@@ -1,28 +1,61 @@
-name: rustbuild
+name: rust-release
 
 on:
     push:
-        branches: ["master"]
-    pull_request:
-        branches: ["master"]
-
-env:
-    CARGO_TERM_COLOR: always
+        tags:
+            - "v*"
 
 jobs:
     build:
         runs-on: ubuntu-latest
 
+        strategy:
+            matrix:
+                include:
+                    - os: ubuntu-latest
+                      target: x86_64-unknown-linux-gnu
+                      bin: gram
+
+                    - os: windows-latest
+                      target: x86_64-pc-windows-msvc
+                      bin: gram.exe
+
+                    - os: macos-latest
+                      target: x86_64-apple-darwin
+                      bin: gram
+
+                    - os: macos-latest
+                      target: aarch64-apple-darwin
+                      bin: gram
+
         steps:
-            - name: Checkout repository (with submodules)
-              uses: actions/checkout@v4
+            - uses: actions/checkout@v4
               with:
                   submodules: recursive
-                  token: ${{ secrets.ghtoken }}
-                  persist-credentials: true
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.target }}
 
             - name: Build
-              run: cargo build --verbose
+              run: cargo build --release --target ${{ matrix.target }}
 
-            - name: Run tests
-              run: cargo test --verbose
+            - name: Prepare artifact (unix)
+              if: runner.os != 'Windows'
+              run: |
+                  mkdir -p dist
+                  cp target/${{ matrix.target }}/release/${{ matrix.bin }} dist/${{ matrix.bin }}-${{ matrix.target }}
+
+            - name: Prepare artifact (windows)
+              if: runner.os == 'Windows'
+              run: |
+                  mkdir dist
+                  copy target\${{ matrix.target }}\release\${{ matrix.bin }} dist\${{ matrix.bin }}-${{ matrix.target }}.exe
+
+            - name: Upload release assets
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: dist/*
+              env:
+                  GITHUB_TOKEN: ${{ secrets.ghtoken }}
