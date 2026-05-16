@@ -18,7 +18,7 @@ jobs:
 		  uses: actions/checkout@v4
 		  with:
 			  submodules: recursive
-			  token: ${{ secrets.GITHUB_TOKEN }}
+			  token: ${{ secrets.ghtoken }}
 
 	  - name: Build
 		run: cargo build --verbose

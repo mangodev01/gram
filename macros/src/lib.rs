@@ -87,10 +87,18 @@ pub fn settings(input: TokenStream) -> TokenStream {
 
         quote! {
             #key => {
-                let de = toml::de::ValueDeserializer::parse(value)
-                    .unwrap_or_else(|_| {
-                        toml::de::ValueDeserializer::new(toml::Value::String(value.to_owned()))
-                    });
+                let owned_value;
+                let de = match toml::de::ValueDeserializer::parse(value) {
+                    Ok(de) => de,
+                    Err(_) => {
+                        owned_value = format!(
+                            "\"{}\"",
+                            value.replace('\\', "\\\\").replace('"', "\\\"")
+                        );
+                        toml::de::ValueDeserializer::parse(&owned_value)
+                            .map_err(|_| "invalid value")?
+                    }
+                };
                 let parsed: #ty = serde::Deserialize::deserialize(de)
                     .map_err(|_| "invalid value")?;
                 self.#name = parsed;
