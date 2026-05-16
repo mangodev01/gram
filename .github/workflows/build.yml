@@ -19,6 +19,7 @@ jobs:
               with:
                   submodules: recursive
                   token: ${{ secrets.ghtoken }}
+                  persist-credentials: true
 
             - name: Build
               run: cargo build --verbose
