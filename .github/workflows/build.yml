@@ -38,6 +38,14 @@ jobs:
               with:
                   targets: ${{ matrix.target }}
 
+            - name: Build TDLib
+              run: |
+                cd td_api/td
+                mkdir -p build
+                cd build
+                cmake .. -DCMAKE_BUILD_TYPE=Release
+                cmake --build . -j 4
+
             - name: Build
               run: cargo build --release --target ${{ matrix.target }}
 
