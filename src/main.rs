@@ -1,0 +1,283 @@
+#![feature(decl_macro, hash_map_macro)]
+
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    ColorChoice, CommandFactory, FromArgMatches,
+};
+use rustyline::error::ReadlineError;
+use td_api::{ChatList, FormattedText, InputFile, InputMessageContent};
+
+use crate::{
+    interp::Interpreter,
+    util::{error, info},
+};
+
+mod conf;
+mod interp;
+mod util;
+
+#[derive(clap::Parser)]
+struct Cli {
+    #[command(subcommand)]
+    subcommand: Command,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum GramChat {
+    Label(String),
+    ChatID(i64),
+}
+
+impl std::str::FromStr for GramChat {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(id) = s.parse::<i64>() {
+            Ok(GramChat::ChatID(id))
+        } else {
+            Ok(GramChat::Label(s.to_string()))
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct GramMessageContent(InputMessageContent);
+
+fn resolve_path(val: &str) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(val);
+
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(path)
+    };
+
+    std::fs::canonicalize(&abs).map_err(|e| e.to_string())
+}
+
+pub fn message_content(s: &str) -> Result<GramMessageContent, String> {
+    let Some((kind, val)) = s.split_once(' ') else {
+        return Err("string is not split by spaces".to_string());
+    };
+    if kind == "text" {
+        return Ok(GramMessageContent(InputMessageContent::InputMessageText {
+            text: FormattedText {
+                text: val.to_string(),
+                entities: vec![],
+            },
+            clear_draft: true,
+            link_preview_options: None,
+        }));
+    } else if kind == "doc" {
+        let path = resolve_path(val).map_err(|e| e.to_string())?;
+        return Ok(GramMessageContent(
+            InputMessageContent::InputMessageDocument {
+                document: InputFile::Local {
+                    path: path.to_string_lossy().to_string(),
+                },
+                thumbnail: None,
+                disable_content_type_detection: false,
+                caption: None,
+            },
+        ));
+    }
+    Err("failed to get message from string - invalid type".to_string())
+}
+
+#[derive(clap::Subcommand, Clone, PartialEq)]
+enum Command {
+    #[clap(about = "authenticate with telegram")]
+    Login,
+
+    #[clap(about = "deauthenticate from telegram")]
+    Logout,
+
+    #[clap(about = "print gram version")]
+    Version,
+
+    #[clap(about = "list chat folders")]
+    Folders,
+
+    #[clap(about = "clear repl - only works in repl mode")]
+    Clear,
+
+    #[clap(about = "send a message to a chat")]
+    Send {
+        target_chat: GramChat,
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
+    },
+
+    #[clap(about = "reply to a message in a chat")]
+    Reply {
+        target_chat: GramChat,
+
+        target_message: i64,
+
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
+    },
+
+    #[clap(about = "read recent messages of a chat")]
+    Read {
+        target_chat: GramChat,
+        #[arg(default_value = "10")]
+        limit: i32,
+    },
+
+    #[clap(about = "get/set a label for a chat")]
+    Label {
+        /// the telegram chat id you wanna label
+        chat_id: i64,
+
+        /// the label you wanna give that telegram chat id (None if user wants to GET a label of a
+        /// chat)
+        label: Option<String>,
+    },
+
+    #[clap(about = "list/get/set gram settings")]
+    Settings {
+        // if only key is provided, get
+        // if both key and value are provided, set
+        // if none are provided, list
+        key: Option<String>,
+        #[arg(allow_hyphen_values = true)]
+        value: Option<String>,
+    },
+
+    #[clap(alias = "quit", about = "exit gram")]
+    Exit,
+
+    #[clap(about = "list chats")]
+    Chats {
+        #[arg(default_value = "200")]
+        limit: i32,
+
+        #[arg(value_parser = chat_list, default_value = "main")]
+        chat_list: ChatList,
+    },
+}
+
+pub fn chat_list(s: &str) -> Result<ChatList, String> {
+    if s == "m" || s == "main" || s == "ChatList::Main" {
+        return Ok(ChatList::Main);
+    } else if s == "a" || s == "archive" || s == "ChatList::Archive" {
+        return Ok(ChatList::Archive);
+    } else {
+        if s.starts_with("folder/") || s.starts_with("f/") || s.starts_with("ChatList::Folder/") {
+            let (_, folder_id) = s.split_once("/").unwrap();
+            let folder_id_num = folder_id.parse::<i32>();
+
+            if let Ok(chat_folder_id) = folder_id_num {
+                return Ok(ChatList::Folder { chat_folder_id });
+            }
+        }
+    }
+
+    Err("invalid chat list".to_string())
+}
+
+fn main() {
+    let mut interp = Interpreter::new();
+
+    let styles = Styles::styled()
+        .header(AnsiColor::BrightGreen.on_default().bold())
+        .usage(AnsiColor::BrightGreen.on_default().bold())
+        .literal(AnsiColor::BrightCyan.on_default().bold())
+        .placeholder(AnsiColor::BrightCyan.on_default());
+
+    let mut line_empty = true;
+
+    if std::env::args_os().len() == 1 {
+        let mut ed = rustyline::DefaultEditor::new().unwrap();
+
+        loop {
+            let line = match ed.readline(&interp.prompt()) {
+                Ok(line) => line,
+                Err(ReadlineError::Interrupted) => {
+                    if !line_empty {
+                        info!(
+                            interp.conf.lock().settings.color,
+                            "use `exit` or `quit` to exit."
+                        );
+                    }
+
+                    "".to_string()
+                }
+                Err(ReadlineError::Eof) => break,
+                Err(e) => {
+                    error!(interp.conf.lock().settings.color, "{e}");
+                    break;
+                }
+            };
+
+            if line.trim().is_empty() {
+                line_empty = true;
+                continue;
+            }
+
+            line_empty = false;
+
+            ed.add_history_entry(&line).unwrap();
+
+            let matches = match Cli::command()
+                .styles(styles.clone())
+                .color(if interp.conf.lock().settings.color {
+                    ColorChoice::Always
+                } else {
+                    ColorChoice::Never
+                })
+                .try_get_matches_from(std::iter::once("gram").chain(line.split_whitespace()))
+            {
+                Ok(cli) => cli,
+                Err(e) => {
+                    // allow clap to manage its own colors without forcing them on using
+                    // ceprintln
+                    e.print().unwrap();
+                    continue;
+                }
+            };
+
+            let parsed = match Cli::from_arg_matches(&matches) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    error!(interp.conf.lock().settings.color, "{e}");
+                    continue;
+                }
+            };
+
+            if matches!(parsed.subcommand, Command::Clear) {
+                ed.clear_screen().unwrap();
+                continue;
+            }
+
+            interp.run(parsed.subcommand);
+
+            if interp.should_exit {
+                return;
+            }
+        }
+    } else {
+        let matches = Cli::command()
+            .styles(styles)
+            .color(if interp.conf.lock().settings.color {
+                ColorChoice::Always
+            } else {
+                ColorChoice::Never
+            })
+            .get_matches();
+
+        let cli = Cli::from_arg_matches(&matches).unwrap();
+
+        if matches!(cli.subcommand, Command::Clear) {
+            error!(
+                interp.conf.lock().settings.color,
+                "clear only works in REPL"
+            );
+            return;
+        }
+
+        interp.run(cli.subcommand);
+    }
+}

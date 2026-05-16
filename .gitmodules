@@ -1,0 +1,3 @@
+[submodule "td_api"]
+	path = td_api
+	url = https://www.github.com/mangodev01/td_api

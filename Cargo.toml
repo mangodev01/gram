@@ -1,0 +1,19 @@
+[package]
+name = "gram"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4.44"
+clap = { version = "4.6.1", features = ["derive", "string", "unicode"] }
+color-print = "0.3.7"
+directories = "6.0.0"
+notify-rust = { version = "4.17.0", features = ["zbus"] }
+parking_lot = { version = "0.12.5", features = ["nightly", "deadlock_detection"] }
+rustyline = "18.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+tabled = { version = "0.20.0", default-features = false, features = ["std"] }
+td_api = { version = "0.1.0", path = "td_api" }
+macros = { version = "*", path = "./macros" }
+toml = "1.1.2"
+notify = "8.2.0"
