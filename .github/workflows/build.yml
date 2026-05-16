@@ -1,26 +1,27 @@
 name: rustbuild
 
 on:
-  push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+	push:
+		branches: ["master"]
+pull_request:
+	branches: ["master"]
 
 env:
-  CARGO_TERM_COLOR: always
+	CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+	build:
+		runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository (with submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+	steps:
+		- name: Checkout repository (with submodules)
+		  uses: actions/checkout@v4
+		  with:
+			  submodules: recursive
+			  token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build
-        run: cargo build --verbose
+	  - name: Build
+		run: cargo build --verbose
 
-      - name: Run tests
-        run: cargo test --verbose
+	  - name: Run tests
+		run: cargo test --verbose
