@@ -58,9 +58,9 @@ jobs:
                   brew install cmake gperf openssl pkg-config
 
             - name: Install dependencies (Windows)
-                  if: runner.os == 'Windows'
-                  run: |
-                      winget install Kitware.CMake
+              if: runner.os == 'Windows'
+              run: |
+                  winget install Kitware.CMake
 
             - name: Build TDLib
               run: |
