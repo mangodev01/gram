@@ -9,6 +9,7 @@ jobs:
     build:
         strategy:
             fail-fast: false
+
             matrix:
                 include:
                     - os: ubuntu-latest
@@ -19,7 +20,7 @@ jobs:
                       target: x86_64-pc-windows-msvc
                       bin: gram.exe
 
-                    - os: macos-latest
+                    - os: macos-13
                       target: x86_64-apple-darwin
                       bin: gram
 
@@ -69,21 +70,25 @@ jobs:
 
             - name: Build TDLib
               shell: bash
+              working-directory: td_api/td
               run: |
-                  cd td_api/td
                   mkdir -p bin
                   cd bin
 
                   if [ "$RUNNER_OS" = "Windows" ]; then
                       cmake .. \
                         -DCMAKE_BUILD_TYPE=Release \
+                        -DCMAKE_INSTALL_PREFIX=.. \
                         -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
                         -DGPERF_EXECUTABLE="C:/ProgramData/chocolatey/bin/gperf.exe"
                   else
-                      cmake .. -DCMAKE_BUILD_TYPE=Release
+                      cmake .. \
+                        -DCMAKE_BUILD_TYPE=Release \
+                        -DCMAKE_INSTALL_PREFIX=..
                   fi
 
-                  cmake --build . -j 4
+                  cmake --build . --config Release -j 4
+                  cmake --install .
 
             - name: Build
               run: cargo build --release --target ${{ matrix.target }}
