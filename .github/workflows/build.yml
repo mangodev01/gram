@@ -9,7 +9,6 @@ jobs:
     build:
         strategy:
             fail-fast: false
-
             matrix:
                 include:
                     - os: ubuntu-latest
@@ -44,16 +43,7 @@ jobs:
               if: runner.os == 'Linux'
               run: |
                   sudo apt-get update
-
-                  sudo apt-get install -y \
-                      cmake \
-                      g++ \
-                      make \
-                      gperf \
-                      perl \
-                      pkg-config \
-                      libssl-dev \
-                      zlib1g-dev
+                  sudo apt-get install -y cmake g++ make gperf perl pkg-config libssl-dev zlib1g-dev
 
             - name: Install dependencies (macOS)
               if: runner.os == 'macOS'
@@ -67,13 +57,13 @@ jobs:
                   choco install strawberryperl -y
                   choco install winflexbison3 -y
                   choco install gperf -y
-                  choco install zlib -y
 
-                  echo "C:\ProgramData\chocolatey\bin" `
-                  | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+                  vcpkg install zlib:x64-windows
+                  echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+                  echo "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-                  echo "C:\ProgramData\chocolatey\lib\winflexbison3\tools" `
-                  | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+                  echo "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+                  echo "C:\ProgramData\chocolatey\lib\winflexbison3\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
                   Get-Command gperf
 
@@ -81,17 +71,16 @@ jobs:
               shell: bash
               run: |
                   cd td_api/td
-
                   mkdir -p build
                   cd build
 
                   if [ "$RUNNER_OS" = "Windows" ]; then
                       cmake .. \
                         -DCMAKE_BUILD_TYPE=Release \
+                        -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
                         -DGPERF_EXECUTABLE="C:/ProgramData/chocolatey/bin/gperf.exe"
                   else
-                      cmake .. \
-                        -DCMAKE_BUILD_TYPE=Release
+                      cmake .. -DCMAKE_BUILD_TYPE=Release
                   fi
 
                   cmake --build . -j 4
@@ -103,20 +92,14 @@ jobs:
               if: runner.os != 'Windows'
               run: |
                   mkdir -p dist
-
-                  cp \
-                    target/${{ matrix.target }}/release/${{ matrix.bin }} \
-                    dist/gram-${{ matrix.target }}
+                  cp target/${{ matrix.target }}/release/${{ matrix.bin }} dist/gram-${{ matrix.target }}
 
             - name: Prepare artifact (windows)
               if: runner.os == 'Windows'
               shell: pwsh
               run: |
                   mkdir dist
-
-                  Copy-Item `
-                    "target/${{ matrix.target }}/release/${{ matrix.bin }}" `
-                    "dist/gram-${{ matrix.target }}.exe"
+                  Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/gram-${{ matrix.target }}.exe"
 
             - name: Upload release assets
               uses: softprops/action-gh-release@v2
