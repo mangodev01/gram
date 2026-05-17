@@ -8,6 +8,8 @@ on:
 jobs:
     build:
         strategy:
+            fail-fast: false
+
             matrix:
                 include:
                     - os: ubuntu-latest
@@ -62,21 +64,35 @@ jobs:
               if: runner.os == 'Windows'
               shell: pwsh
               run: |
-                  winget install Kitware.CMake `
-                    --accept-package-agreements `
-                    --accept-source-agreements
-
+                  choco install strawberryperl -y
                   choco install winflexbison3 -y
+                  choco install gperf -y
+
+                  echo "C:\ProgramData\chocolatey\bin" `
+                  | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
                   echo "C:\ProgramData\chocolatey\lib\winflexbison3\tools" `
-                    | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+                  | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+                  Get-Command gperf
 
             - name: Build TDLib
+              shell: bash
               run: |
                   cd td_api/td
+
                   mkdir -p build
                   cd build
-                  cmake .. -DCMAKE_BUILD_TYPE=Release
+
+                  if [ "$RUNNER_OS" = "Windows" ]; then
+                      cmake .. \
+                        -DCMAKE_BUILD_TYPE=Release \
+                        -DGPERF_EXECUTABLE="C:/ProgramData/chocolatey/bin/gperf.exe"
+                  else
+                      cmake .. \
+                        -DCMAKE_BUILD_TYPE=Release
+                  fi
+
                   cmake --build . -j 4
 
             - name: Build
@@ -89,7 +105,7 @@ jobs:
 
                   cp \
                     target/${{ matrix.target }}/release/${{ matrix.bin }} \
-                    dist/${{ matrix.bin }}-${{ matrix.target }}
+                    dist/gram-${{ matrix.target }}
 
             - name: Prepare artifact (windows)
               if: runner.os == 'Windows'
@@ -97,9 +113,9 @@ jobs:
               run: |
                   mkdir dist
 
-                  copy `
-                    target\${{ matrix.target }}\release\${{ matrix.bin }} `
-                    dist\${{ matrix.bin }}-${{ matrix.target }}.exe
+                  Copy-Item `
+                    "target/${{ matrix.target }}/release/${{ matrix.bin }}" `
+                    "dist/gram-${{ matrix.target }}.exe"
 
             - name: Upload release assets
               uses: softprops/action-gh-release@v2
