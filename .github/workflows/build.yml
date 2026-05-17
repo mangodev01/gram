@@ -67,6 +67,7 @@ jobs:
                   choco install strawberryperl -y
                   choco install winflexbison3 -y
                   choco install gperf -y
+                  choco install zlib -y
 
                   echo "C:\ProgramData\chocolatey\bin" `
                   | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
