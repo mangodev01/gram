@@ -71,8 +71,8 @@ jobs:
               shell: bash
               run: |
                   cd td_api/td
-                  mkdir -p build
-                  cd build
+                  mkdir -p bin
+                  cd bin
 
                   if [ "$RUNNER_OS" = "Windows" ]; then
                       cmake .. \
