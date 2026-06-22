@@ -2,6 +2,8 @@
 - [ ] make encryption configurable
 - [ ] handle td errors correctly (tell rustyline to redraw)
 - [ ] calls (unsure if needed; deemed way too complicated atm)
+- [ ] make it so all gram scripts are NOT required to start with login. also fix single command 
+- [ ] maybe make script execution safer
 
 ## settings
 (types prefixed with ? here mean that they're optional)

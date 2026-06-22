@@ -1,5 +1,7 @@
 #![feature(decl_macro, hash_map_macro, strip_circumfix)]
 
+use std::path::PathBuf;
+
 use clap::{
     builder::{styling::AnsiColor, Styles},
     ColorChoice, CommandFactory, FromArgMatches,
@@ -23,7 +25,7 @@ mod completion;
 #[derive(clap::Parser)]
 struct Cli {
     #[command(subcommand)]
-    subcommand: Command,
+    pub subcommand: Command,
 }
 
 #[derive(Clone, PartialEq)]
@@ -101,7 +103,7 @@ pub fn message_content(s: &str) -> Result<GramMessageContent, String> {
 }
 
 #[derive(clap::Subcommand, Clone, PartialEq)]
-enum Command {
+pub enum Command {
     #[clap(about = "authenticate with telegram")]
     Login,
 
@@ -186,6 +188,9 @@ enum Command {
         #[arg(value_parser = chat_list, default_value = "main")]
         chat_list: ChatList,
     },
+
+	#[command(external_subcommand)]
+	Script(Vec<String>),
 }
 
 pub fn chat_list(s: &str) -> Result<ChatList, String> {
@@ -226,7 +231,6 @@ fn main() {
 		};
 
 		ed.set_helper(Some(helper));
-
 		ed.set_completion_type(rustyline::CompletionType::Circular);
 
         loop {

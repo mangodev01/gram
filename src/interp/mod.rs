@@ -4,6 +4,7 @@ mod watcher;
 mod commands;
 mod init;
 
+use clap::{CommandFactory, FromArgMatches as _};
 use color_print::cformat;
 use std::{
     path::PathBuf,
@@ -13,7 +14,7 @@ use std::{
 use td_api::*;
 
 use crate::{
-    Command, conf::GramConf, interp::commands::{AuthCommands as _, ChatCommands as _, LabelCommands as _, SettingCommands}, util
+    Cli, Command, conf::GramConf, interp::commands::{AuthCommands as _, ChatCommands as _, LabelCommands as _, SettingCommands}, util
 };
 
 use std::path::Path;
@@ -109,6 +110,53 @@ impl Interpreter {
                     self.label(chat_id, label);
                 }
             }
+			Command::Script(files) => {
+				for file in &files {
+					if !Path::new(&file).exists() {
+						util::error!(
+							self.conf.lock().settings.color,
+							"script file {} doesnt exist", file.clone()
+						);
+
+						return;
+					}
+				}
+
+				for file in files {
+					let contents = std::fs::read_to_string(&file).unwrap();
+					let lines = contents.lines();
+
+					for (i, line) in lines.enumerate() {
+						let args = std::iter::once("gram").chain(line.split_whitespace());
+
+						let matches = Cli::command().try_get_matches_from(args);
+
+						if let Ok(matches) = matches {
+							let cli = Cli::from_arg_matches(&matches);
+
+							if let Ok(cli) = cli {
+								self.run(cli.subcommand);
+							} else if let Err(e) = cli {
+								util::error!(
+									self.conf.lock().settings.color,
+									"command conversion error in {}:{} -> {}",
+									file,
+									i+1,
+									e
+								);
+							}
+						} else if let Err(e) = matches {
+							util::error!(
+								self.conf.lock().settings.color,
+								"parse error in {}:{} -> {}",
+								file,
+								i+1,
+								e
+							);
+						}
+					}
+				}
+			},
             _ => {}
         }
     }
