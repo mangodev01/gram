@@ -30,3 +30,18 @@ pub macro success($colors:expr, $($arg:tt)*) {
         println!($($arg)*);
     }
 }
+
+pub fn shorten(max_len_before_shortening: i32, s: &str) -> String {
+    if max_len_before_shortening < 0 {
+        return s.to_string();
+    }
+    let max_len = max_len_before_shortening as usize;
+    if s.chars().count() > max_len {
+        s.chars().take(max_len).collect::<String>() + "..."
+    } else {
+        s.to_string()
+    }
+}
+
+
+

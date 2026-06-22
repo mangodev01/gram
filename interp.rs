@@ -1,9 +1,8 @@
 use color_print::cformat;
 use notify::{Event, RecursiveMode, Watcher as _};
 use std::{
-    path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
-    sync::Arc,
+    path::{Path, PathBuf},
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
 };
 use tabled::{
     builder::Builder,
@@ -278,6 +277,32 @@ impl Interpreter {
                     Err(e) => error!(self.conf.lock().settings.color, "error: {}", e),
                 }
             }
+			Command::Text { 
+				target_chat,
+				message
+			} => {
+				let joined = message.join(" ");
+
+				self.send(target_chat, None, crate::text_content(&joined));
+			}
+			Command::Doc { 
+				target_chat,
+				message
+			} => {
+				let joined = message.join(" ");
+
+				let doc_path = Path::new(&joined);
+
+				if !doc_path.exists() {
+					error!(self.conf.lock().settings.color,
+						"document at path {} does not exist.",
+						doc_path.to_string_lossy().to_string());
+
+					return;
+				}
+
+				self.send(target_chat, None, crate::doc_content(doc_path));
+			}
             Command::Reply {
                 target_chat,
                 target_message,

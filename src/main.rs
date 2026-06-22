@@ -1,9 +1,12 @@
-#![feature(decl_macro, hash_map_macro)]
+#![feature(decl_macro, hash_map_macro, strip_circumfix)]
 
 use clap::{
     builder::{styling::AnsiColor, Styles},
     ColorChoice, CommandFactory, FromArgMatches,
 };
+
+use rustyline::{config::Configurer as _, hint::HistoryHinter};
+use rustyline::history::DefaultHistory;
 use rustyline::error::ReadlineError;
 use td_api::{ChatList, FormattedText, InputFile, InputMessageContent};
 
@@ -15,6 +18,7 @@ use crate::{
 mod conf;
 mod interp;
 mod util;
+mod completion;
 
 #[derive(clap::Parser)]
 struct Cli {
@@ -56,33 +60,44 @@ fn resolve_path(val: &str) -> Result<std::path::PathBuf, String> {
     std::fs::canonicalize(&abs).map_err(|e| e.to_string())
 }
 
+fn text_content(s: &str) -> GramMessageContent {
+    GramMessageContent(InputMessageContent::InputMessageText {
+        text: FormattedText {
+            text: s.to_string(),
+            entities: vec![],
+        },
+        clear_draft: true,
+        link_preview_options: None,
+    })
+}
+
+fn doc_content(path: &std::path::Path) -> GramMessageContent {
+    GramMessageContent(InputMessageContent::InputMessageDocument {
+        document: InputFile::Local {
+            path: path.to_string_lossy().to_string(),
+        },
+        thumbnail: None,
+        disable_content_type_detection: false,
+        caption: None,
+    })
+}
+
 pub fn message_content(s: &str) -> Result<GramMessageContent, String> {
-    let Some((kind, val)) = s.split_once(' ') else {
-        return Err("string is not split by spaces".to_string());
-    };
-    if kind == "text" {
-        return Ok(GramMessageContent(InputMessageContent::InputMessageText {
-            text: FormattedText {
-                text: val.to_string(),
-                entities: vec![],
-            },
-            clear_draft: true,
-            link_preview_options: None,
-        }));
-    } else if kind == "doc" {
-        let path = resolve_path(val).map_err(|e| e.to_string())?;
-        return Ok(GramMessageContent(
-            InputMessageContent::InputMessageDocument {
-                document: InputFile::Local {
-                    path: path.to_string_lossy().to_string(),
-                },
-                thumbnail: None,
-                disable_content_type_detection: false,
-                caption: None,
-            },
-        ));
+    if let Some(txt) = s.strip_circumfix("\"", "\"") {
+        if let Ok(path) = resolve_path(txt) {
+            if path.try_exists().is_ok_and(|x| x) {
+                return Ok(text_content(txt));
+            }
+        }
     }
-    Err("failed to get message from string - invalid type".to_string())
+
+    if let Ok(path) = resolve_path(s) {
+        if path.try_exists().is_ok_and(|x| x) {
+            return Ok(doc_content(&path));
+        }
+    }
+
+    Ok(text_content(s))
 }
 
 #[derive(clap::Subcommand, Clone, PartialEq)]
@@ -102,8 +117,22 @@ enum Command {
     #[clap(about = "clear repl - only works in repl mode")]
     Clear,
 
-    #[clap(about = "send a message to a chat")]
+    #[clap(about = "send a message to a chat (automatically determines what type the message is)")]
     Send {
+        target_chat: GramChat,
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
+    },
+
+    #[clap(about = "send a TEXT message to a chat (force text)")]
+    Text {
+        target_chat: GramChat,
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
+    },
+
+    #[clap(about = "send a DOCUMENT to a chat (force document)")]
+    Doc {
         target_chat: GramChat,
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
@@ -190,7 +219,15 @@ fn main() {
     let mut line_empty = true;
 
     if std::env::args_os().len() == 1 {
-        let mut ed = rustyline::DefaultEditor::new().unwrap();
+        let mut ed = rustyline::Editor::<completion::GramHelper, DefaultHistory>::new().unwrap();
+
+		let helper = completion::GramHelper {
+			hinter: HistoryHinter::default(),
+		};
+
+		ed.set_helper(Some(helper));
+
+		ed.set_completion_type(rustyline::CompletionType::Circular);
 
         loop {
             let line = match ed.readline(&interp.prompt()) {
@@ -235,6 +272,7 @@ fn main() {
                     // allow clap to manage its own colors without forcing them on using
                     // ceprintln
                     e.print().unwrap();
+
                     continue;
                 }
             };
@@ -281,3 +319,4 @@ fn main() {
         interp.run(cli.subcommand);
     }
 }
+
