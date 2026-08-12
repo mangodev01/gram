@@ -6,6 +6,7 @@ use crate::GramMessageContent;
 use crate::Interpreter;
 
 use crate::interp::commands::ChatCommands;
+use crate::interp::display::GramMessage;
 use crate::util;
 
 impl ChatCommands for Interpreter {
@@ -89,13 +90,23 @@ impl ChatCommands for Interpreter {
             return;
         }
 
+		let chat = client.chats().get_chat(chat_id);
         let history = client.chats().get_chat_history(chat_id, 0, 0, limit, false);
 
         util::info!(
             self.conf.lock().settings.color,
             "got {} messages.", history.total_count
         );
-        self.print_messages(history.messages.unwrap_or_default().as_slice());
+
+
+		let vanilla_messages = history.messages.unwrap_or_default();
+
+		let messages: Vec<GramMessage> = vanilla_messages
+			.iter()
+			.map(|m| GramMessage { msg: m.clone(), chat: chat.clone() })
+			.collect();
+
+        self.print_messages(&messages);
     }
 
 	fn send(
@@ -129,6 +140,46 @@ impl ChatCommands for Interpreter {
 		client
 			.messages()
 			.send_message(chat_id, None, reply_to, None, None, content);
+	}
+
+	fn forward(
+		&mut self,
+		target_chat: GramChat,
+		target_msg: i64,
+		to: GramChat,
+		forward: bool
+	) {
+		let mut client = self.client.lock();
+
+		if !self.chats_loaded {
+			let _ = client.chats().get_chats(None, 200);
+			self.chats_loaded = true;
+		}
+
+		let chat_id = self.resolve_user(target_chat);
+		let msg_to_forward = client.messages().get_message(chat_id, target_msg);
+		let to = self.resolve_user(to);
+
+		if forward {
+			client
+				.messages()
+				.forward_messages(to, None, chat_id, vec![target_msg], None, false, false);
+		} else {
+			let imc = util::message_content_to_input_message_content(*msg_to_forward.content);
+
+			if imc.is_none() {
+				util::error!(
+					self.conf.lock().settings.color,
+					"error: couldn't convert message content to input message content"
+				);
+
+				return;
+			}
+
+			let imc = imc.unwrap();
+
+			client.messages().send_message(to, None, None, None, None, imc);
+		}
 	}
 
 
@@ -175,5 +226,52 @@ impl ChatCommands for Interpreter {
 		util::info!(self.conf.lock().settings.color, "{}", table);
 	}
 
+	fn search_messages(&mut self, target_chat: Option<GramChat>, q: String) {
+		let mut client = self.client.lock();
+
+		if let Some(chat) = target_chat {
+			let chat_id = self.resolve_user(chat);
+
+			let chat = client
+				.chats()
+				.get_chat(chat_id);
+
+			let msgs = client.messages().search_chat_messages(
+				chat_id,
+				None,
+				q,
+				None,
+				0i64,
+				0i32,
+				200i32,
+				None
+			).messages.as_slice().iter().map(|msg| {
+				GramMessage { msg: msg.clone(), chat: chat.clone() }
+			}).collect::<Vec<_>>();
+
+			self.print_messages(msgs.as_slice());
+		} else {
+			let msgs = client.messages().search_messages(
+				None,
+				q,
+				String::new(),
+				200i32,
+				None,
+				None,
+				0i32,
+				0i32
+			).messages.iter().map(|msg| {
+				let chat_id = msg.chat_id;
+
+				let chat = client
+					.chats()
+					.get_chat(chat_id);
+
+				GramMessage { msg: msg.clone(), chat }
+			}).collect::<Vec<_>>();
+
+			self.print_messages(msgs.as_slice());
+		}
+	}
 }
 

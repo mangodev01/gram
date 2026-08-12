@@ -85,6 +85,7 @@ impl Interpreter {
             conf_path,
             should_exit: false,
             chats_loaded: false,
+			me: None,
             shutdown,
         }
     }

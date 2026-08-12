@@ -105,7 +105,12 @@ impl Interpreter {
         // error thread
         std::thread::spawn(move || {
             for err in recvs.error_rx {
+				println!();
                 error!(conf_errors.lock().settings.color, "error: {:#?}", err);
+
+				//if let Some(readline) = readline {
+					// readline.rerender();
+				//}
             }
         });
     }

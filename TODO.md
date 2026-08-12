@@ -23,3 +23,6 @@ settings are in `[settings]` in conf.toml
 
 ## features
 - [x] REPL completion with clap
+- [x] deleting messages
+- [x] editing messages
+- [x] message status

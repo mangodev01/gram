@@ -1,7 +1,5 @@
 #![feature(decl_macro, hash_map_macro, strip_circumfix)]
 
-use std::path::PathBuf;
-
 use clap::{
     builder::{styling::AnsiColor, Styles},
     ColorChoice, CommandFactory, FromArgMatches,
@@ -140,11 +138,26 @@ pub enum Command {
         message: Vec<String>,
     },
 
+	#[clap(about = "delete a message in a chat")]
+	Delete {
+		target_chat: GramChat,
+        target_message: i64,
+	},
+
+	#[clap(about = "edit a message in a chat")]
+	Edit {
+		target_chat: GramChat,
+        target_message: i64,
+
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
+	},
+
     #[clap(about = "reply to a message in a chat")]
     Reply {
         target_chat: GramChat,
 
-        target_message: i64,
+        target_message: Option<i64>,
 
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
@@ -160,6 +173,7 @@ pub enum Command {
     #[clap(about = "get/set a label for a chat")]
     Label {
         /// the telegram chat id you wanna label
+        #[arg(allow_hyphen_values = true)]
         chat_id: i64,
 
         /// the label you wanna give that telegram chat id (None if user wants to GET a label of a
@@ -182,12 +196,66 @@ pub enum Command {
 
     #[clap(about = "list chats")]
     Chats {
-        #[arg(default_value = "200")]
+        #[arg(default_value = "10")]
         limit: i32,
 
         #[arg(value_parser = chat_list, default_value = "main")]
         chat_list: ChatList,
     },
+
+    #[clap(about = "forward a message from chat to chat")]
+	Forward {
+        target_chat: GramChat,
+
+        target_message: i64,
+
+		to: GramChat
+	},
+
+	#[clap(about = "pins a message")]
+	Pin {
+		target_chat: GramChat,
+
+		target_message: i64
+	},
+
+	#[clap(about = "unpins a message")]
+	Unpin {
+		target_chat: GramChat,
+
+		target_message: i64
+	},
+
+	#[clap(
+		about = "searches for messages either globally or in a chat",
+		after_help = "searches globally across all chats by default\n\
+prefix with 'in <chat>' to search within a specific chat:\n\
+\n\
+search hello world        search all chats for \"hello world\"\n\
+search in bob hello       search only in bob's chat for \"hello\"\n\
+\n\
+use 'gsearch' instead of 'search' to force a global search\n\
+even if your query happens to start with 'in'"
+	)]
+	Search {
+		#[arg(trailing_var_arg = true, allow_hyphen_values = true, value_name = "[in CHAT] QUERY...")]
+		q: Vec<String>
+	},
+
+	#[clap(about = "searches for messages globally")]
+	Gsearch {
+		#[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+		q: Vec<String>
+	},
+
+    #[clap(about = "forward a message from chat to chat WITHOUT leaving a trace of the message being forwarded")]
+	Repost {
+        target_chat: GramChat,
+
+        target_message: i64,
+
+		to: GramChat
+	},
 
 	#[command(external_subcommand)]
 	Script(Vec<String>),

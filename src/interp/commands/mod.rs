@@ -10,7 +10,10 @@ pub(super) trait ChatCommands {
     fn read(&mut self, target_chat: GramChat, limit: i32);
 
 	fn send(&mut self, target_chat: GramChat, reply_to: Option<i64>, message: GramMessageContent);
+	fn forward(&mut self, target_chat: GramChat, target_msg: i64, to: GramChat, forward: bool);
 	fn resolve_user(&self, target_chat: GramChat) -> i64;
+
+	fn search_messages(&mut self, target_chat: Option<GramChat>, q: String);
 
 	fn folders(&self);
 }

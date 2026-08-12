@@ -14,7 +14,7 @@ use std::{
 use td_api::*;
 
 use crate::{
-    Cli, Command, conf::GramConf, interp::commands::{AuthCommands as _, ChatCommands as _, LabelCommands as _, SettingCommands}, util
+    Cli, Command, GramChat, conf::GramConf, interp::commands::{AuthCommands as _, ChatCommands as _, LabelCommands as _, SettingCommands}, util
 };
 
 use std::path::Path;
@@ -28,6 +28,7 @@ pub struct Interpreter {
     pub should_exit: bool,
     pub chats_loaded: bool,
     pub shutdown: Arc<AtomicBool>,
+	pub me: Option<i64>,
 }
 
 // TODO: implement nesting so you can `enter` a group/supergroup to manage it without
@@ -47,6 +48,8 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn run(&mut self, line: Command) {
+        self.try_set_me();
+
         match line {
             Command::Login => self.auth(),
             Command::Logout => self.unauth(),
@@ -65,7 +68,21 @@ impl Interpreter {
                     Ok(content) => self.send(target_chat, None, content),
                     Err(e) => util::error!(self.conf.lock().settings.color, "util::error: {}", e),
                 }
-            }
+            },
+			Command::Forward {
+				target_chat,
+				target_message,
+				to,
+			} => {
+				self.forward(target_chat, target_message, to, true);
+			},
+			Command::Repost {
+				target_chat,
+				target_message,
+				to,
+			} => {
+				self.forward(target_chat, target_message, to, false);
+			},
 			Command::Text { 
 				target_chat,
 				message
@@ -74,6 +91,38 @@ impl Interpreter {
 
 				self.send(target_chat, None, crate::text_content(&joined));
 			}
+			Command::Pin { target_chat, target_message } => {
+				let mut cli = self.client.lock();
+
+				let chat_id = self.resolve_user(target_chat);
+
+				cli.messages().pin_chat_message(chat_id, target_message, true, false);
+			},
+			Command::Unpin { target_chat, target_message } => {
+				let mut cli = self.client.lock();
+
+				let chat_id = self.resolve_user(target_chat);
+
+				cli.messages().pin_chat_message(chat_id, target_message, true, false);
+			},
+			Command::Search { q } => {
+				let (target_chat, q) = if q.first().map(String::as_str) == Some("in") {
+					let chat = q.get(1).cloned().unwrap_or_default();
+					let target_chat = Some(match chat.parse::<i64>() {
+						Ok(id) => GramChat::ChatID(id),
+						Err(_) => GramChat::Label(chat),
+					});
+					let rest = q.get(2..).unwrap_or(&[]).join(" ");
+					(target_chat, rest)
+				} else {
+					(None, q.join(" "))
+				};
+
+				self.search_messages(target_chat, q);
+			},
+			Command::Gsearch { q } => {
+				self.search_messages(None, q.join(""));
+			},
 			Command::Doc { 
 				target_chat,
 				message
@@ -92,6 +141,30 @@ impl Interpreter {
 
 				self.send(target_chat, None, crate::doc_content(doc_path));
 			}
+			Command::Delete { 
+				target_chat,
+				target_message,
+			} => {
+				let chat = self.resolve_user(target_chat);
+
+				self.client.lock().messages().delete_messages(chat, vec![target_message], true);
+			}
+			Command::Edit { 
+				target_chat,
+				target_message,
+				message,
+			} => {
+				let chat = self.resolve_user(target_chat);
+
+				self.client.lock().messages().edit_message_text(chat, target_message, None, InputMessageContent::InputMessageText {
+					text: FormattedText {
+						text: message.join(" ").to_owned(),
+						entities: vec![],
+					},
+					link_preview_options: None,
+					clear_draft: false
+				});
+			}
             Command::Reply {
                 target_chat,
                 target_message,
@@ -99,7 +172,7 @@ impl Interpreter {
             } => {
                 let joined = message.join(" ");
                 match crate::message_content(&joined) {
-                    Ok(content) => self.send(target_chat, Some(target_message), content),
+                    Ok(content) => self.send(target_chat, target_message, content),
                     Err(e) => util::error!(self.conf.lock().settings.color, "util::error: {}", e),
                 }
             }
@@ -158,6 +231,18 @@ impl Interpreter {
 				}
 			},
             _ => {}
+        }
+    }
+
+    fn try_set_me(&mut self) {
+        if self.me.is_some() {
+            return;
+        }
+
+        let mut client = self.client.lock();
+
+        if matches!(client.state(), AuthorizationState::Ready) {
+            self.me = Some(client.general().get_me().id);
         }
     }
 

@@ -5,6 +5,12 @@ impl AuthCommands for Interpreter {
         let mut client = self.client.lock();
 
         client.authenticate_with_console().unwrap();
+
+		let me = client
+            .general()
+            .get_me();
+
+        self.me = Some(me.id);
     }
 
     fn unauth(&mut self) {

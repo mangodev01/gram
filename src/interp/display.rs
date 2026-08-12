@@ -5,20 +5,60 @@ use td_api::*;
 
 use crate::{interp::Interpreter, util::*};
 
+pub struct GramMessage {
+	pub msg: Message,
+	pub chat: Chat,
+}
+
 impl Interpreter {
-    pub(super) fn print_messages(&self, messages: &[Message]) {
+    pub(super) fn print_messages(&self, messages: &[GramMessage]) {
         let mut builder = Builder::new();
-        builder.push_record(["ID", "Sender", "Date", "Content"]);
-        let max_len = self.conf.lock().settings.max_len_before_shortening;
+        builder.push_record(["ID", "Sender", "Date", "Content", "Status"]);
+		let conf = self.conf.lock();
+        let max_len = conf.settings.max_len_before_shortening;
         for msg in messages.iter().rev() {
-            let sender = match &msg.sender_id {
-                MessageSender::User { user_id } => shorten(max_len, &format!("user:{}", user_id)),
-                MessageSender::Chat { chat_id } => shorten(max_len, &format!("chat:{}", chat_id)),
-            };
-            let date = chrono::DateTime::from_timestamp(msg.date as i64, 0)
-                .map(|d| d.format("%H:%M:%S").to_string())
-                .unwrap_or_else(|| msg.date.to_string());
-            let content = match msg.content.as_ref() {
+			let sender = match &msg.msg.sender_id {
+				MessageSender::User { user_id } => {
+					let id = format!("user:{}", user_id);
+
+					let name = conf.labels
+						.get(user_id)
+						.map(|lbl| {
+							if self.me == Some(*user_id) {
+								"me".to_string()
+							} else {
+								lbl.name.to_string()
+							}
+						})
+						.unwrap_or_else(|| return shorten(max_len, id.as_str()));
+
+					shorten(max_len, &name)
+				}
+
+				MessageSender::Chat { chat_id } => {
+					let id = format!("chat:{}", chat_id);
+
+					let name = conf.labels
+						.get(chat_id)
+						.map(|lbl| {
+							if self.me == Some(*chat_id) {
+								"me".to_string()
+							} else {
+								lbl.name.to_string()
+							}
+						})
+						.unwrap_or_else(|| return shorten(max_len, id.as_str()));
+
+					shorten(max_len, &name)
+				}
+			};
+
+			let read_outbox = msg.chat.last_read_outbox_message_id;
+
+            let date = chrono::DateTime::from_timestamp(msg.msg.date as i64, 0)
+                .map(|d| d.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+                .unwrap_or_else(|| msg.msg.date.to_string());
+            let content = match msg.msg.content.as_ref() {
                 MessageContent::MessageText { text, .. } => shorten(max_len, &text.text),
                 MessageContent::MessagePhoto { .. } => "[photo]".to_string(),
                 MessageContent::MessageDocument { document, .. } => {
@@ -32,11 +72,22 @@ impl Interpreter {
 				MessageContent::MessageCall { unique_id: _, is_video, discard_reason: _, duration } => format!("[{}sec {}call]", duration, if *is_video { "video " } else { "" }),
                 _ => "[other]".to_string(),
             };
-            builder.push_record([msg.id.to_string(), sender, date, content]);
+
+			let unread = if !msg.msg.is_outgoing {
+				""
+			} else if msg.msg.sending_state.is_some() {
+				"✗"
+			} else if read_outbox >= msg.msg.id {
+				"✓✓"
+			} else {
+				"✓"
+			};
+
+            builder.push_record([msg.msg.id.to_string(), sender, date, content, unread.to_owned()]);
         }
         let mut table = builder.build();
         Self::init_table(&mut table);
-        info!(self.conf.lock().settings.color, "{}", table);
+        info!(conf.settings.color, "{}", table);
     }
 
     pub(super) fn push_chat(
