@@ -138,6 +138,14 @@ pub enum Command {
         message: Vec<String>,
     },
 
+	#[clap(about = "fetch info of yourself (as the user)")]
+	Me,
+
+	#[clap(about = "fetch info of a chat")]
+	Chat {
+		chat: GramChat
+	},
+
 	#[clap(about = "delete a message in a chat")]
 	Delete {
 		target_chat: GramChat,
@@ -202,6 +210,27 @@ pub enum Command {
         #[arg(value_parser = chat_list, default_value = "main")]
         chat_list: ChatList,
     },
+
+    #[clap(about = "show message toml")]
+	Toml {
+        target_chat: GramChat,
+
+        target_message: i64,
+	},
+
+    #[clap(about = "show message ron")]
+	Ron {
+        target_chat: GramChat,
+
+        target_message: i64,
+	},
+
+    #[clap(about = "show message json")]
+	Json {
+        target_chat: GramChat,
+
+        target_message: i64,
+	},
 
     #[clap(about = "forward a message from chat to chat")]
 	Forward {

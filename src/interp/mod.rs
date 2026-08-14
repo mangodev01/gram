@@ -6,6 +6,7 @@ mod init;
 
 use clap::{CommandFactory, FromArgMatches as _};
 use color_print::cformat;
+use ron::ser::PrettyConfig;
 use std::{
     path::PathBuf,
     sync::{Arc, atomic::AtomicBool},
@@ -50,6 +51,16 @@ impl Interpreter {
     pub fn run(&mut self, line: Command) {
         self.try_set_me();
 
+		let msg = |ch,msg| {
+			let mut cli = self.client.lock();
+
+			let chat_id = self.resolve_user(ch);
+
+			cli
+				.messages()
+				.get_message(chat_id, msg)
+		};
+
         match line {
             Command::Login => self.auth(),
             Command::Logout => self.unauth(),
@@ -64,11 +75,68 @@ impl Interpreter {
                 message,
             } => {
                 let joined = message.join(" ");
+
                 match crate::message_content(&joined) {
                     Ok(content) => self.send(target_chat, None, content),
                     Err(e) => util::error!(self.conf.lock().settings.color, "util::error: {}", e),
                 }
             },
+			Command::Toml {
+				target_chat,
+				target_message,
+			} => {
+				let msg = msg(target_chat, target_message);
+				
+				let toml = toml::to_string_pretty(&msg).unwrap();
+				let color = self.conf.lock().settings.color;
+
+				util::success!(color, "{}", toml);
+			},
+			Command::Ron {
+				target_chat,
+				target_message,
+			} => {
+				fn rename_type(value: &mut serde_json::Value) {
+					match value {
+						serde_json::Value::Object(obj) => {
+							if let Some(value) = obj.remove("@type") {
+								obj.insert("_type".into(), value);
+							}
+
+							for value in obj.values_mut() {
+								rename_type(value);
+							}
+						}
+						serde_json::Value::Array(arr) => {
+							for value in arr {
+								rename_type(value);
+							}
+						}
+						_ => {}
+					}
+				}
+
+				let msg = msg(target_chat, target_message);
+
+				let mut val = serde_json::to_value(&msg).unwrap();
+				rename_type(&mut val);
+				
+				let ron = ron::ser::to_string_pretty(&val, PrettyConfig::default()).unwrap();
+				let color = self.conf.lock().settings.color;
+
+				util::success!(color, "{}", ron);
+			},
+			Command::Json {
+				target_chat,
+				target_message,
+			} => {
+				let msg = msg(target_chat, target_message);
+
+				let json = serde_json::to_string_pretty(&msg).unwrap();
+				let color = self.conf.lock().settings.color;
+
+				util::success!(color, "{}", json);
+			},
 			Command::Forward {
 				target_chat,
 				target_message,
@@ -103,7 +171,7 @@ impl Interpreter {
 
 				let chat_id = self.resolve_user(target_chat);
 
-				cli.messages().pin_chat_message(chat_id, target_message, true, false);
+				cli.messages().unpin_chat_message(chat_id, target_message);
 			},
 			Command::Search { q } => {
 				let (target_chat, q) = if q.first().map(String::as_str) == Some("in") {
@@ -140,6 +208,108 @@ impl Interpreter {
 				}
 
 				self.send(target_chat, None, crate::doc_content(doc_path));
+			}
+			Command::Me => {
+				let mut cli = self.client.lock();
+
+				let me = cli
+					.general()
+					.get_me();
+
+				let me_full = cli
+					.users()
+					.get_user_full_info(me.id);
+
+				self.print_user_full(me, me_full);
+			}
+			Command::Chat { chat } => {
+				let mut cli = self.client.lock();
+
+				let chat_id = self.resolve_user(chat);
+
+				let user = cli
+					.chats()
+					.get_chat(chat_id);
+
+				match user.r#type {
+					ChatType::Private { user_id } => {
+						let user = cli
+							.users()
+							.get_user(user_id);
+
+						let user_full = cli
+							.users()
+							.get_user_full_info(user_id);
+
+						self.print_user_full(user, user_full);
+					},
+					ChatType::BasicGroup { basic_group_id } => {
+						let basic_group = cli.groups()
+							.get_basic_group_full_info(basic_group_id);
+
+						let basic_group_partial_info = cli.groups()
+							.get_basic_group(basic_group_id);
+
+						self.print_basic_group_meta(basic_group_partial_info, basic_group.clone());
+
+						for member in basic_group.members {
+							if let MessageSender::User { user_id } = member.member_id {
+								let user = cli
+									.users()
+									.get_user(user_id);
+
+								let user_full = cli
+									.users()
+									.get_user_full_info(user_id);
+
+								self.print_user_full(user, user_full);
+							}
+						}
+					},
+					ChatType::Supergroup { supergroup_id, .. } => {
+                        let super_group_full_info = cli.groups()
+                            .get_supergroup_full_info(supergroup_id);
+
+                        let super_group = cli.groups()
+                            .get_supergroup(supergroup_id);
+
+                        let members = cli.groups()
+                            .get_supergroup_members(supergroup_id, None, 0, 10000);
+
+                        self.print_super_group_meta(super_group, super_group_full_info.clone());
+
+						for member in members.members {
+							if let MessageSender::User { user_id } = member.member_id {
+								let user = cli
+									.users()
+									.get_user(user_id);
+
+								let user_full = cli
+									.users()
+									.get_user_full_info(user_id);
+
+								self.print_user_full(user, user_full);
+							}
+						}
+                    },
+					ChatType::Secret { secret_chat_id, user_id } => {
+                        let user = cli
+                            .users()
+                            .get_user(user_id);
+
+                        let user_full = cli
+                            .users()
+                            .get_user_full_info(user_id);
+
+                        let chat = cli
+                            .chats()
+                            .get_secret_chat(secret_chat_id);
+
+                        util::info!(self.conf.lock().settings.color, "secret chat layer: {}", chat.layer);
+
+                        self.print_user_full(user, user_full);
+                    },
+				}
 			}
 			Command::Delete { 
 				target_chat,

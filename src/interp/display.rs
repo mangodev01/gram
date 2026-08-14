@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use tabled::{
     Table, builder::Builder, settings::{Alignment, Color, Modify, Style, Width, object::{Columns, Rows}}
 };
@@ -121,6 +122,91 @@ impl Interpreter {
                 label,
             ]);
         }
+    }
+
+	pub(super) fn print_user_full(&self, user: User, user_full: UserFullInfo) {
+		let mut builder = Builder::new();
+
+		builder.push_record(["ID", "Bio?", "Name", "Phone number", "Birthdate?", "Note?", "Premium"]);
+
+		let conf = self.conf.lock();
+
+		let birthdate = user_full.birthdate;
+
+		builder.push_record([
+			user.id.to_string(),
+			user_full.bio.map(|x| x.text).unwrap_or("".to_string()),
+			conf.settings.user_sender_mode.with_user(user.clone()),
+			user.phone_number,
+			if let Some(birthdate) = birthdate {
+				NaiveDate::from_ymd_opt(
+					birthdate.year, 
+					birthdate.month as u32, 
+					birthdate.day as u32
+				).unwrap().format("%x").to_string()
+			} else {
+				"".to_string()
+			},
+			user_full.note.map(|x| x.text).unwrap_or("".to_string()),
+			user.is_premium.to_string()
+		]);
+
+		let mut table = builder.build();
+
+		Interpreter::init_table(&mut table);
+
+		info!(conf.settings.color, "{}", table);
+	}
+
+    pub(super) fn print_basic_group_meta(&self, basic_group_partial_info: BasicGroup, basic_group: BasicGroupFullInfo) {
+		let mut builder = Builder::new();
+
+		builder.push_record(["ID", "Member count", "Description", "Invite link?", "Can toggle agressive antispam"]);
+
+		let conf = self.conf.lock();
+
+		let id = basic_group_partial_info.id;
+
+		builder.push_record([
+			id.to_string(),
+			basic_group_partial_info.member_count.to_string(),
+			basic_group.description,
+			basic_group.invite_link.map(|x| x.invite_link).unwrap_or("".to_string()),
+			basic_group.can_toggle_aggressive_anti_spam.to_string()
+		]);
+
+		let mut table = builder.build();
+
+		Interpreter::init_table(&mut table);
+
+		info!(conf.settings.color, "{}", table);
+    }
+
+    pub(super) fn print_super_group_meta(&self, super_group: Supergroup, super_group_full: SupergroupFullInfo) {
+		let mut builder = Builder::new();
+
+		builder.push_record(["ID", "Member count", "Is channel", "Description", "Invite link?", "Can toggle agressive antispam", "Banned users", "Gift count"]);
+
+		let conf = self.conf.lock();
+
+		let id = super_group.id;
+
+		builder.push_record([
+			id.to_string(),
+			super_group.member_count.to_string(),
+			super_group.is_channel.to_string(),
+			super_group_full.description,
+			super_group_full.invite_link.map(|x| x.invite_link).unwrap_or("".to_string()),
+			super_group_full.can_toggle_aggressive_anti_spam.to_string(),
+			super_group_full.banned_count.to_string(),
+			super_group_full.gift_count.to_string(),
+		]);
+
+		let mut table = builder.build();
+
+		Interpreter::init_table(&mut table);
+
+		info!(conf.settings.color, "{}", table);
     }
 
 	pub(super) fn init_table(table: &mut Table) {
