@@ -1,4 +1,64 @@
-use {td_api::{FormattedText, InputChecklist, InputChecklistTask, InputFile, InputMessageContent, InputPollOption, InputPollType, MessageContent, PollType}};
+use td_api::{
+    FormattedText, InputAnimation, InputAudio, InputChecklist, InputChecklistTask, InputDocument, InputFile, InputMessageContent, InputPhoto, InputPollOption, InputPollType, InputSticker, InputVideo, InputVideoNote, InputVoiceNote, MessageContent, PollType
+};
+
+/// Unwrap a `Result<T, td_api::error::TdError>` coming from a td_api call.
+///
+/// On `Ok(v)` this evaluates to `v`. On `Err(e)` it prints a clean, colored
+/// error message using the current interpreter's color setting and `return`s
+/// from the enclosing function early, keeping the REPL alive instead of
+/// panicking.
+///
+/// Usage: `let chat = tri!(self, client.chats().get_chat(id));`
+///
+/// An optional trailing expression can be supplied as the value to return on
+/// error (defaults to `()`): `tri!(self, expr, -1)`.
+pub macro tri {
+    ($self:expr, $e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(err) => {
+                $crate::util::error!(
+                    $self.conf.lock().settings.color,
+                    "telegram error {}: {}",
+                    err.code,
+                    err.message
+                );
+                return;
+            }
+        }
+    },
+    ($self:expr, $e:expr, $ret:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(err) => {
+                $crate::util::error!(
+                    $self.conf.lock().settings.color,
+                    "telegram error {}: {}",
+                    err.code,
+                    err.message
+                );
+                return $ret;
+            }
+        }
+    }
+}
+
+/// Log a td_api `Result` if it failed, ignoring the success value.
+///
+/// Useful for "fire and forget" calls (pin, delete, etc.) where we don't need
+/// the returned value but still want to surface failures instead of silently
+/// discarding them with `let _ = ...`.
+pub macro log_err($self:expr, $e:expr) {
+    if let Err(err) = $e {
+        $crate::util::error!(
+            $self.conf.lock().settings.color,
+            "telegram error {}: {}",
+            err.code,
+            err.message
+        );
+    }
+}
 
 pub macro info($colors:expr, $($arg:tt)*) {
     if $colors {
@@ -64,14 +124,16 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
             has_spoiler,
 			..
         } => Some(InputMessageContent::InputMessageAnimation {
-            animation: InputFile::Id {
-                id: animation.animation.id,
+            animation: InputAnimation {
+                animation: InputFile::Id {
+                    id: animation.animation.id,
+                },
+                thumbnail: None,
+                added_sticker_file_ids: Vec::new(),
+                duration: animation.duration,
+                width: animation.width,
+                height: animation.height,
             },
-            thumbnail: None,
-            added_sticker_file_ids: Vec::new(),
-            duration: animation.duration,
-            width: animation.width,
-            height: animation.height,
             caption: Some(caption),
             show_caption_above_media,
             has_spoiler,
@@ -79,22 +141,26 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
  
         MessageContent::MessageAudio { audio, caption } => {
             Some(InputMessageContent::InputMessageAudio {
-                audio: InputFile::Id { id: audio.audio.id },
-                album_cover_thumbnail: None,
-                duration: audio.duration,
-                title: audio.title,
-                performer: audio.performer,
+                audio: InputAudio {
+                    audio: InputFile::Id { id: audio.audio.id },
+                    album_cover_thumbnail: None,
+                    duration: audio.duration,
+                    title: audio.title,
+                    performer: audio.performer,
+                },
                 caption: Some(caption),
             })
         }
  
         MessageContent::MessageDocument { document, caption } => {
             Some(InputMessageContent::InputMessageDocument {
-                document: InputFile::Id {
-                    id: document.document.id,
+                document: InputDocument {
+                    document: InputFile::Id {
+                        id: document.document.id,
+                    },
+                    thumbnail: None,
+                    disable_content_type_detection: false,
                 },
-                thumbnail: None,
-                disable_content_type_detection: false,
                 caption: Some(caption),
             })
         }
@@ -124,15 +190,17 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
             has_spoiler,
             ..
         } => Some(InputMessageContent::InputMessagePhoto {
-            photo: InputFile::Id {
-                // Largest available size is last in `sizes`.
-                id: photo.sizes.last()?.photo.id,
+            photo: InputPhoto {
+                photo: InputFile::Id {
+                    // Largest available size is last in `sizes`.
+                    id: photo.sizes.last()?.photo.id,
+                },
+                thumbnail: None,
+                video: None,
+                added_sticker_file_ids: Vec::new(),
+                width: photo.sizes.last().map(|s| s.width).unwrap_or_default(),
+                height: photo.sizes.last().map(|s| s.height).unwrap_or_default(),
             },
-            thumbnail: None,
-            video: None,
-            added_sticker_file_ids: Vec::new(),
-            width: photo.sizes.last().map(|s| s.width).unwrap_or_default(),
-            height: photo.sizes.last().map(|s| s.height).unwrap_or_default(),
             caption: Some(caption),
             show_caption_above_media,
             self_destruct_type: None,
@@ -141,12 +209,14 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
  
         MessageContent::MessageSticker { sticker, .. } => {
             Some(InputMessageContent::InputMessageSticker {
-                sticker: InputFile::Id {
-                    id: sticker.sticker.id,
+                sticker: InputSticker {
+                    sticker: InputFile::Id {
+                        id: sticker.sticker.id,
+                    },
+                    thumbnail: None,
+                    width: sticker.width,
+                    height: sticker.height,
                 },
-                thumbnail: None,
-                width: sticker.width,
-                height: sticker.height,
                 emoji: sticker.emoji,
             })
         }
@@ -158,15 +228,17 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
             has_spoiler,
             ..
         } => Some(InputMessageContent::InputMessageVideo {
-            video: InputFile::Id { id: video.video.id },
-            thumbnail: None,
-            cover: None,
-            start_timestamp: 0,
-            added_sticker_file_ids: Vec::new(),
-            duration: video.duration,
-            width: video.width,
-            height: video.height,
-            supports_streaming: video.supports_streaming,
+            video: InputVideo {
+                video: InputFile::Id { id: video.video.id },
+                thumbnail: None,
+                cover: None,
+                start_timestamp: 0,
+                added_sticker_file_ids: Vec::new(),
+                duration: video.duration,
+                width: video.width,
+                height: video.height,
+                supports_streaming: video.supports_streaming,
+            },
             caption: Some(caption),
             show_caption_above_media,
             self_destruct_type: None,
@@ -175,12 +247,14 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
  
         MessageContent::MessageVideoNote { video_note, .. } => {
             Some(InputMessageContent::InputMessageVideoNote {
-                video_note: InputFile::Id {
-                    id: video_note.video.id,
+                video_note: InputVideoNote {
+                    video_note: InputFile::Id {
+                        id: video_note.video.id,
+                    },
+                    thumbnail: None,
+                    duration: video_note.duration,
+                    length: video_note.length,
                 },
-                thumbnail: None,
-                duration: video_note.duration,
-                length: video_note.length,
                 self_destruct_type: None,
             })
         }
@@ -190,26 +264,29 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
             caption,
             ..
         } => Some(InputMessageContent::InputMessageVoiceNote {
-            voice_note: InputFile::Id {
-                id: voice_note.voice.id,
+            voice_note: InputVoiceNote {
+                voice_note: InputFile::Id {
+                    id: voice_note.voice.id,
+                },
+                duration: voice_note.duration,
+                waveform: voice_note.waveform,
             },
-            duration: voice_note.duration,
-            waveform: voice_note.waveform,
             caption: Some(caption),
             self_destruct_type: None,
         }),
  
+        MessageContent::MessageLiveLocation {
+            location,
+            ..
+        } => Some(InputMessageContent::InputMessageLiveLocation {
+            location,
+        }),
+
         MessageContent::MessageLocation {
             location,
-            live_period,
-            heading,
-            proximity_alert_radius,
             ..
         } => Some(InputMessageContent::InputMessageLocation {
             location,
-            live_period,
-            heading,
-            proximity_alert_radius,
         }),
  
         MessageContent::MessageVenue { venue } => {
@@ -260,13 +337,10 @@ pub fn message_content_to_input_message_content(content: MessageContent) -> Opti
             hide_results_until_closes: false,
             r#type: Box::new(if let PollType::Regular = poll.r#type {
 				InputPollType::Regular { allow_adding_options: true }
-			} else if let PollType::Quiz { correct_option_ids, explanation, explanation_media } = poll.r#type {
-				InputPollType::Quiz { correct_option_ids, explanation, explanation_media: if let Some(media) = explanation_media {
-					let media = *media;
-					message_content_to_input_message_content(media)
-				} else {
-					None
-				}}
+			} else if let PollType::Quiz { correct_option_ids, explanation, .. } = poll.r#type {
+				// NOTE: the received `explanation_media` is a `PollMedia`, which does not map
+				// cleanly to the `InputPollMedia` expected when sending. Dropping it here.
+				InputPollType::Quiz { correct_option_ids, explanation, explanation_media: None }
 			} else {
 				unreachable!()
 			}),

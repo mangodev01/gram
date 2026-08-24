@@ -15,6 +15,9 @@ pub struct GramConf {
 
 	#[serde(default = "default_settings")]
     pub settings: GramSettings,
+
+    #[serde(default = "default_encryption")]
+    pub encryption: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -42,6 +45,11 @@ settings! {
     pub color: bool = default_true,
 
     pub dev: bool = default_false,
+}
+
+#[allow(dead_code)]
+fn default_encryption() -> Option<String> {
+    None
 }
 
 #[allow(dead_code)]
@@ -77,12 +85,12 @@ pub enum UserSenderMode {
     LastName,
 
     /// labels user senders by telegram user ID
-    UserID,
+    UserId,
 
     /// labels user senders by custom pattern
     /// example of custom pattern usage:
     /// ```
-    /// {{first_name}}/{{last_name}}--{{user_id}}
+    /// {{first_name}} {{last_name}} ({{user_id}})
     /// ```
     Custom(String),
 }
@@ -95,7 +103,7 @@ impl UserSenderMode {
             }
             UserSenderMode::FirstName => user.first_name,
             UserSenderMode::LastName => user.last_name,
-            UserSenderMode::UserID => user.id.to_string(),
+            UserSenderMode::UserId => user.id.to_string(),
             UserSenderMode::Custom(fmt) => fmt
                 .replace("{{first_name}}", &user.first_name)
                 .replace("{{last_name}}", &user.last_name)
@@ -119,7 +127,7 @@ pub enum ChatSenderMode {
     Title,
 
     /// labels chat senders by telegram chat ID
-    ChatID,
+    ChatId,
 
     /// labels chat senders by custom pattern
     /// example of custom pattern usage:
@@ -138,7 +146,7 @@ impl ChatSenderMode {
                 .map(|x| x.name.clone())
                 .unwrap_or(chat.title),
             ChatSenderMode::Title => chat.title,
-            ChatSenderMode::ChatID => chat.id.to_string(),
+            ChatSenderMode::ChatId => chat.id.to_string(),
             ChatSenderMode::Custom(fmt) => fmt
                 .replace("{{title}}", &chat.title)
                 .replace(

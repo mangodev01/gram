@@ -1,9 +1,8 @@
 - [x] working parser && repl implementation
-- [ ] make encryption configurable
-- [ ] handle td errors correctly (tell rustyline to redraw)
+- [x] handle td errors correctly (tell rustyline to redraw) FIXED: rework error system completely
+- [x] make encryption configurable
+- [x] maybe make script execution safer
 - [ ] calls (unsure if needed; deemed way too complicated atm)
-- [ ] make it so all gram scripts are NOT required to start with login. also fix single command 
-- [ ] maybe make script execution safer
 
 ## settings
 (types prefixed with ? here mean that they're optional)
@@ -16,7 +15,7 @@ settings are in `[settings]` in conf.toml
 | P1       | [x]    | max_len_before_shortening | enum | max length before shortening (appending '...') message / username / other text, -1 means don't shorten at all             |  -1   |
 | P2       | [x]    | dev_mode                  | bool | show/hide telegram internal IDs. true=show, false=hide                                                                    | true  |
 | P2       | [x]    | color                     | bool | enable/disable color in the CLI                                                                                           | true  |
-| P1       | [ ]    | encryption_key            | ?str | enable encryption with the set encryption key. NOT setting this means telegram traffic is unencrypted                     | false |
+| P1       | [x]    | encryption                | ?str | enable encryption with the set encryption key. NOT setting this means that the database is unencrypted                    | false |
 
 ## refactors
 - [x] split `interp.rs` into modules — `display.rs` (print_messages, push_chat, init_table), `notify.rs` (notify thread), `watcher.rs` (conf watcher thread), keep `interp.rs` thin (dispatch + state)

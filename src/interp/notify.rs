@@ -24,7 +24,18 @@ impl Interpreter {
 
         let sender = match message.sender_id {
             MessageSender::User { user_id } => {
-                let user = client.users().get_user(user_id);
+                let user = match client.users().get_user(user_id) {
+                    Ok(user) => user,
+                    Err(err) => {
+                        util::error!(
+                            conf.settings.color,
+                            "telegram error {}: {}",
+                            err.code,
+                            err.message
+                        );
+                        return;
+                    }
+                };
 
                 util::shorten(
                     max_len,
@@ -32,7 +43,18 @@ impl Interpreter {
                 )
             }
             MessageSender::Chat { chat_id } => {
-                let chat = client.chats().get_chat(chat_id);
+                let chat = match client.chats().get_chat(chat_id) {
+                    Ok(chat) => chat,
+                    Err(err) => {
+                        util::error!(
+                            conf.settings.color,
+                            "telegram error {}: {}",
+                            err.code,
+                            err.message
+                        );
+                        return;
+                    }
+                };
 
                 util::shorten(
                     max_len,
@@ -99,20 +121,5 @@ impl Interpreter {
 				}
 			}
 		});
-
-        let conf_errors = Arc::clone(&conf);
-
-        // error thread
-        std::thread::spawn(move || {
-            for err in recvs.error_rx {
-				println!();
-                error!(conf_errors.lock().settings.color, "error: {:#?}", err);
-
-				//if let Some(readline) = readline {
-					// readline.rerender();
-				//}
-            }
-        });
     }
-
 }

@@ -13,30 +13,39 @@ impl Interpreter {
         let db = cur.join("db");
         let files = cur.join("files");
 
+        let dirs =
+            ProjectDirs::from("me", "illia", "gram").expect("failed to get project directories");
+
+        let conf_path = dirs.config_dir().join("conf.toml");
+
+        let read_conf = std::fs::read_to_string(&conf_path).unwrap();
+
+        let conf: GramConf = toml::from_str(&read_conf).expect("failed to parse config");
+
         let params = TdParamsBuilder::new()
             .creds_from_env("ID", "HASH")
             .db_dir(db)
             .files_dir(files)
-            .app_version("0.0.1".to_string())
+            .app_version(env!("CARGO_PKG_VERSION").to_string())
             .use_test_dc(false)
+            .use_file_db(true)
+            .use_chat_info_db(true)
+            .use_msg_db(true)
             .enable_storage_optimiser(true)
             .use_secret_chats(true)
             .device_model("gram".to_string())
             .sys_lang_code("en".to_string())
             .build();
 
-        // TODO: make Encryption::Yes an option
-        let (mut client, recvs) = TdClient::new(params, Encryption::No);
+        let encryption = conf.encryption.clone().map_or(Encryption::No, |enc| Encryption::Yes(enc.to_string()));
 
-        client.general().set_log_verbosity_level(0);
+        TdClient::set_global_verbosity(0);
 
-        client.set_verbosity(0);
+        let (client, recvs) = TdClient::new(params, encryption);
+
         client.set_log_to_file(false);
 
         let client = Arc::new(parking_lot::Mutex::new(client));
-
-        let dirs =
-            ProjectDirs::from("me", "illia", "gram").expect("failed to get project directories");
 
         let _ = std::fs::create_dir_all(dirs.cache_dir());
         let _ = std::fs::create_dir_all(dirs.config_dir());
@@ -50,15 +59,9 @@ impl Interpreter {
                 .unwrap_or_default(),
         ));
 
-        let conf_path = dirs.config_dir().join("conf.toml");
-
         if !std::fs::exists(&conf_path).is_ok_and(|x| x) {
             let _ = std::fs::write(&conf_path, DEFAULT_CONFIG);
         }
-
-        let read_conf = std::fs::read_to_string(&conf_path).unwrap();
-
-        let conf: GramConf = toml::from_str(&read_conf).expect("failed to parse config");
 
         let conf = Arc::new(parking_lot::Mutex::new(conf));
         let shutdown = Arc::new(AtomicBool::new(false));

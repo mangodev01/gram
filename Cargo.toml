@@ -13,7 +13,7 @@ parking_lot = { version = "0.12.5", features = ["nightly", "deadlock_detection"]
 rustyline = "18.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 tabled = { version = "0.20.0", default-features = false, features = ["std"] }
-td_api = { version = "0.1.0", path = "td_api" }
+td_api = { version = "0.1.1", path = "td_api" }
 macros = { version = "*", path = "./macros" }
 toml = "1.1.2"
 notify = "8.2.0"

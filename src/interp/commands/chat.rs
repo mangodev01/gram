@@ -8,6 +8,35 @@ use crate::Interpreter;
 use crate::interp::commands::ChatCommands;
 use crate::interp::display::GramMessage;
 use crate::util;
+use crate::util::{log_err, tri};
+
+impl Interpreter {
+    pub(crate) fn ensure_chats_loaded(&mut self) -> bool {
+        if self.chats_loaded {
+            return true;
+        }
+
+        let mut client = self.client.lock();
+        client.wait_for_state(AuthorizationState::Ready);
+        let result = client.chats().get_chats(None, 200);
+
+        match result {
+            Ok(_) => {
+                self.chats_loaded = true;
+                true
+            }
+            Err(err) => {
+                util::error!(
+                    self.conf.lock().settings.color,
+                    "telegram error {}: {}",
+                    err.code,
+                    err.message
+                );
+                false
+            }
+        }
+    }
+}
 
 impl ChatCommands for Interpreter {
     fn chats(&mut self, limit: i32, chat_list: ChatList) {
@@ -31,7 +60,7 @@ impl ChatCommands for Interpreter {
         }
         drop(conf);
 
-        let chats = client.chats().get_chats(Some(chat_list), limit);
+        let chats = tri!(self, client.chats().get_chats(Some(chat_list), limit));
 
         self.chats_loaded = true;
 
@@ -43,7 +72,7 @@ impl ChatCommands for Interpreter {
                 .get(id)
                 .map(|l| l.name.clone())
                 .unwrap_or("".to_string());
-            let chat = client.chats().get_chat(*id);
+            let chat = tri!(self, client.chats().get_chat(*id));
             let (kind, iid) = match chat.r#type {
                 ChatType::Private { user_id: iid } => ("private", iid),
                 ChatType::BasicGroup {
@@ -77,11 +106,16 @@ impl ChatCommands for Interpreter {
     }
 
     fn read(&mut self, target_chat: GramChat, limit: i32) {
-        let mut client = self.client.lock();
+        if limit < 1 {
+            util::error!(
+                self.conf.lock().settings.color,
+                "message limit must be positive."
+            );
+            return;
+        }
 
-        if !self.chats_loaded {
-            let _ = client.chats().get_chats(None, 200);
-            self.chats_loaded = true;
+        if !self.ensure_chats_loaded() {
+            return;
         }
 
         let chat_id = self.resolve_user(target_chat);
@@ -90,21 +124,86 @@ impl ChatCommands for Interpreter {
             return;
         }
 
-		let chat = client.chats().get_chat(chat_id);
-        let history = client.chats().get_chat_history(chat_id, 0, 0, limit, false);
+        let mut client = self.client.lock();
+        let chat = tri!(self, client.chats().get_chat(chat_id));
+
+        let requested = limit as usize;
+        let mut collected = Vec::with_capacity(requested);
+        let mut seen_ids = std::collections::HashSet::with_capacity(requested);
+        let mut from_message_id = 0i64;
+        let mut no_progress_attempts = 0u8;
+
+        while collected.len() < requested {
+            // Subsequent pages can include the cursor message, so request one
+            // extra item when possible and deduplicate by message ID.
+            let remaining = requested - collected.len();
+            let page_limit = (remaining + usize::from(from_message_id != 0))
+                .min(100) as i32;
+
+            let history = tri!(
+                self,
+                client.chats().get_chat_history(
+                    chat_id,
+                    from_message_id,
+                    0,
+                    page_limit,
+                    false
+                )
+            );
+
+            let page = history.messages.unwrap_or_default();
+
+            if page.is_empty() {
+                break;
+            }
+
+            let next_from_message_id = page.last().map(|message| message.id);
+            let previous_len = collected.len();
+
+            for message in page {
+                if seen_ids.insert(message.id) {
+                    collected.push(message);
+
+                    if collected.len() == requested {
+                        break;
+                    }
+                }
+            }
+
+            let Some(next_from_message_id) = next_from_message_id else {
+                break;
+            };
+
+            if collected.len() == previous_len {
+                no_progress_attempts += 1;
+
+                // TDLib can initially return only the already-known boundary
+                // message while older history is being loaded. Give it a few
+                // more requests, but keep the loop bounded at the end of the
+                // chat history.
+                if no_progress_attempts >= 3 {
+                    break;
+                }
+            } else {
+                no_progress_attempts = 0;
+            }
+
+            from_message_id = next_from_message_id;
+        }
 
         util::info!(
             self.conf.lock().settings.color,
-            "got {} messages.", history.total_count
+            "got {} messages.",
+            collected.len()
         );
 
-
-		let vanilla_messages = history.messages.unwrap_or_default();
-
-		let messages: Vec<GramMessage> = vanilla_messages
-			.iter()
-			.map(|m| GramMessage { msg: m.clone(), chat: chat.clone() })
-			.collect();
+        let messages: Vec<GramMessage> = collected
+            .into_iter()
+            .map(|msg| GramMessage {
+                msg,
+                chat: chat.clone(),
+            })
+            .collect();
 
         self.print_messages(&messages);
     }
@@ -115,13 +214,11 @@ impl ChatCommands for Interpreter {
 		reply_to: Option<i64>,
 		message: GramMessageContent,
 	) {
-		let mut client = self.client.lock();
-
-		if !self.chats_loaded {
-			let _ = client.chats().get_chats(None, 200);
-			self.chats_loaded = true;
+		if !self.ensure_chats_loaded() {
+			return;
 		}
 
+		let mut client = self.client.lock();
 		let chat_id = self.resolve_user(target_chat);
 
 		if chat_id == -1 {
@@ -137,9 +234,12 @@ impl ChatCommands for Interpreter {
 
 		let content = message.0;
 
-		client
-			.messages()
-			.send_message(chat_id, None, reply_to, None, None, content);
+		log_err!(
+			self,
+			client
+				.messages()
+				.send_message(chat_id, None, reply_to, None, None, content)
+		);
 	}
 
 	fn forward(
@@ -149,21 +249,22 @@ impl ChatCommands for Interpreter {
 		to: GramChat,
 		forward: bool
 	) {
-		let mut client = self.client.lock();
-
-		if !self.chats_loaded {
-			let _ = client.chats().get_chats(None, 200);
-			self.chats_loaded = true;
+		if !self.ensure_chats_loaded() {
+			return;
 		}
 
+		let mut client = self.client.lock();
 		let chat_id = self.resolve_user(target_chat);
-		let msg_to_forward = client.messages().get_message(chat_id, target_msg);
+		let msg_to_forward = tri!(self, client.messages().get_message(chat_id, target_msg));
 		let to = self.resolve_user(to);
 
 		if forward {
-			client
-				.messages()
-				.forward_messages(to, None, chat_id, vec![target_msg], None, false, false);
+			log_err!(
+				self,
+				client
+					.messages()
+					.forward_messages(to, None, chat_id, vec![target_msg], None, false, false)
+			);
 		} else {
 			let imc = util::message_content_to_input_message_content(*msg_to_forward.content);
 
@@ -178,7 +279,7 @@ impl ChatCommands for Interpreter {
 
 			let imc = imc.unwrap();
 
-			client.messages().send_message(to, None, None, None, None, imc);
+			log_err!(self, client.messages().send_message(to, None, None, None, None, imc));
 		}
 	}
 
@@ -204,7 +305,7 @@ impl ChatCommands for Interpreter {
 
                 key.unwrap()
             }
-            GramChat::ChatID(id) => id,
+            GramChat::ChatId(id) => id,
         }
     }
 
@@ -232,11 +333,9 @@ impl ChatCommands for Interpreter {
 		if let Some(chat) = target_chat {
 			let chat_id = self.resolve_user(chat);
 
-			let chat = client
-				.chats()
-				.get_chat(chat_id);
+			let chat = tri!(self, client.chats().get_chat(chat_id));
 
-			let msgs = client.messages().search_chat_messages(
+			let found = tri!(self, client.messages().search_chat_messages(
 				chat_id,
 				None,
 				q,
@@ -245,13 +344,15 @@ impl ChatCommands for Interpreter {
 				0i32,
 				200i32,
 				None
-			).messages.as_slice().iter().map(|msg| {
+			));
+
+			let msgs = found.messages.as_slice().iter().map(|msg| {
 				GramMessage { msg: msg.clone(), chat: chat.clone() }
 			}).collect::<Vec<_>>();
 
 			self.print_messages(msgs.as_slice());
 		} else {
-			let msgs = client.messages().search_messages(
+			let found = tri!(self, client.messages().search_messages(
 				None,
 				q,
 				String::new(),
@@ -260,18 +361,19 @@ impl ChatCommands for Interpreter {
 				None,
 				0i32,
 				0i32
-			).messages.iter().map(|msg| {
+			));
+
+			let mut msgs = Vec::with_capacity(found.messages.len());
+
+			for msg in found.messages.iter() {
 				let chat_id = msg.chat_id;
 
-				let chat = client
-					.chats()
-					.get_chat(chat_id);
+				let chat = tri!(self, client.chats().get_chat(chat_id));
 
-				GramMessage { msg: msg.clone(), chat }
-			}).collect::<Vec<_>>();
+				msgs.push(GramMessage { msg: msg.clone(), chat });
+			}
 
 			self.print_messages(msgs.as_slice());
 		}
 	}
 }
-

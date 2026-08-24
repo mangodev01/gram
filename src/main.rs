@@ -1,4 +1,4 @@
-#![feature(decl_macro, hash_map_macro, strip_circumfix)]
+#![feature(decl_macro, hash_map_macro)]
 
 use clap::{
     builder::{styling::AnsiColor, Styles},
@@ -8,7 +8,7 @@ use clap::{
 use rustyline::{config::Configurer as _, hint::HistoryHinter};
 use rustyline::history::DefaultHistory;
 use rustyline::error::ReadlineError;
-use td_api::{ChatList, FormattedText, InputFile, InputMessageContent};
+use td_api::{ChatList, FormattedText, InputDocument, InputFile, InputMessageContent};
 
 use crate::{
     interp::Interpreter,
@@ -29,14 +29,14 @@ struct Cli {
 #[derive(Clone, PartialEq)]
 pub enum GramChat {
     Label(String),
-    ChatID(i64),
+    ChatId(i64),
 }
 
 impl std::str::FromStr for GramChat {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Ok(id) = s.parse::<i64>() {
-            Ok(GramChat::ChatID(id))
+            Ok(GramChat::ChatId(id))
         } else {
             Ok(GramChat::Label(s.to_string()))
         }
@@ -73,11 +73,13 @@ fn text_content(s: &str) -> GramMessageContent {
 
 fn doc_content(path: &std::path::Path) -> GramMessageContent {
     GramMessageContent(InputMessageContent::InputMessageDocument {
-        document: InputFile::Local {
-            path: path.to_string_lossy().to_string(),
+        document: InputDocument {
+            document: InputFile::Local {
+                path: path.to_string_lossy().to_string(),
+            },
+            thumbnail: None,
+            disable_content_type_detection: false,
         },
-        thumbnail: None,
-        disable_content_type_detection: false,
         caption: None,
     })
 }
@@ -103,57 +105,85 @@ pub fn message_content(s: &str) -> Result<GramMessageContent, String> {
 #[derive(clap::Subcommand, Clone, PartialEq)]
 pub enum Command {
     #[clap(about = "authenticate with telegram")]
+    //#[command(next_subcommand_help_heading = "auth")]
     Login,
 
     #[clap(about = "deauthenticate from telegram")]
+    //#[command(next_subcommand_help_heading = "auth")]
     Logout,
 
     #[clap(about = "print gram version")]
+    //#[command(next_subcommand_help_heading = "misc")]
     Version,
 
     #[clap(about = "list chat folders")]
+    //#[command(next_subcommand_help_heading = "misc")]
     Folders,
 
     #[clap(about = "clear repl - only works in repl mode")]
+    //#[command(next_subcommand_help_heading = "repl")]
     Clear,
 
     #[clap(about = "send a message to a chat (automatically determines what type the message is)")]
+    //#[command(next_subcommand_help_heading = "msg")]
     Send {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
     },
 
     #[clap(about = "send a TEXT message to a chat (force text)")]
+    //#[command(next_subcommand_help_heading = "msg")]
     Text {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
     },
 
     #[clap(about = "send a DOCUMENT to a chat (force document)")]
+    //#[command(next_subcommand_help_heading = "msg")]
     Doc {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
     },
 
 	#[clap(about = "fetch info of yourself (as the user)")]
+    //#[command(next_subcommand_help_heading = "auth")]
 	Me,
 
 	#[clap(about = "fetch info of a chat")]
+    //#[command(next_subcommand_help_heading = "misc")]
 	Chat {
+        #[arg(allow_hyphen_values = true)]
 		chat: GramChat
 	},
 
+    #[clap(about = "write a personal note for a chat")]
+    //#[command(next_subcommand_help_heading = "chat")]
+    Note {
+        #[arg(allow_hyphen_values = true)]
+        chat: GramChat,
+        
+        #[arg(trailing_var_arg = true, num_args = 1.., default_value = "")]
+        note: String,
+    },
+
 	#[clap(about = "delete a message in a chat")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Delete {
+        #[arg(allow_hyphen_values = true)]
 		target_chat: GramChat,
         target_message: i64,
 	},
 
 	#[clap(about = "edit a message in a chat")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Edit {
+        #[arg(allow_hyphen_values = true)]
 		target_chat: GramChat,
         target_message: i64,
 
@@ -162,7 +192,9 @@ pub enum Command {
 	},
 
     #[clap(about = "reply to a message in a chat")]
+    //#[command(next_subcommand_help_heading = "msg")]
     Reply {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
 
         target_message: Option<i64>,
@@ -172,13 +204,16 @@ pub enum Command {
     },
 
     #[clap(about = "read recent messages of a chat")]
+    //#[command(next_subcommand_help_heading = "msg")]
     Read {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
         #[arg(default_value = "10")]
         limit: i32,
     },
 
     #[clap(about = "get/set a label for a chat")]
+    //#[command(next_subcommand_help_heading = "cfg")]
     Label {
         /// the telegram chat id you wanna label
         #[arg(allow_hyphen_values = true)]
@@ -190,6 +225,7 @@ pub enum Command {
     },
 
     #[clap(about = "list/get/set gram settings")]
+    //#[command(next_subcommand_help_heading = "cfg")]
     Settings {
         // if only key is provided, get
         // if both key and value are provided, set
@@ -200,9 +236,11 @@ pub enum Command {
     },
 
     #[clap(alias = "quit", about = "exit gram")]
+    //#[command(next_subcommand_help_heading = "misc")]
     Exit,
 
     #[clap(about = "list chats")]
+    //#[command(next_subcommand_help_heading = "chat")]
     Chats {
         #[arg(default_value = "10")]
         limit: i32,
@@ -212,44 +250,70 @@ pub enum Command {
     },
 
     #[clap(about = "show message toml")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Toml {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
 
         target_message: i64,
 	},
 
     #[clap(about = "show message ron")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Ron {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
 
         target_message: i64,
 	},
 
     #[clap(about = "show message json")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Json {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
 
         target_message: i64,
 	},
 
     #[clap(about = "forward a message from chat to chat")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Forward {
+        #[arg(allow_hyphen_values = true)]
         target_chat: GramChat,
 
         target_message: i64,
 
+        #[arg(allow_hyphen_values = true)]
 		to: GramChat
 	},
 
+    #[clap(about = "forward a message from chat to chat WITHOUT leaving a trace of the message being forwarded")]
+    //#[command(next_subcommand_help_heading = "msg")]
+	Repost {
+        #[arg(allow_hyphen_values = true)]
+        target_chat: GramChat,
+
+        target_message: i64,
+
+        #[arg(allow_hyphen_values = true)]
+		to: GramChat
+	},
+
+
 	#[clap(about = "pins a message")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Pin {
+        #[arg(allow_hyphen_values = true)]
 		target_chat: GramChat,
 
 		target_message: i64
 	},
 
 	#[clap(about = "unpins a message")]
+    //#[command(next_subcommand_help_heading = "msg")]
 	Unpin {
+        #[arg(allow_hyphen_values = true)]
 		target_chat: GramChat,
 
 		target_message: i64
@@ -266,24 +330,17 @@ search in bob hello       search only in bob's chat for \"hello\"\n\
 use 'gsearch' instead of 'search' to force a global search\n\
 even if your query happens to start with 'in'"
 	)]
+    //#[command(next_subcommand_help_heading = "chat")]
 	Search {
 		#[arg(trailing_var_arg = true, allow_hyphen_values = true, value_name = "[in CHAT] QUERY...")]
 		q: Vec<String>
 	},
 
 	#[clap(about = "searches for messages globally")]
+    //#[command(next_subcommand_help_heading = "chat")]
 	Gsearch {
 		#[arg(trailing_var_arg = true, allow_hyphen_values = true)]
 		q: Vec<String>
-	},
-
-    #[clap(about = "forward a message from chat to chat WITHOUT leaving a trace of the message being forwarded")]
-	Repost {
-        target_chat: GramChat,
-
-        target_message: i64,
-
-		to: GramChat
 	},
 
 	#[command(external_subcommand)]
@@ -310,8 +367,6 @@ pub fn chat_list(s: &str) -> Result<ChatList, String> {
 }
 
 fn main() {
-    let mut interp = Interpreter::new();
-
     let styles = Styles::styled()
         .header(AnsiColor::BrightGreen.on_default().bold())
         .usage(AnsiColor::BrightGreen.on_default().bold())
@@ -321,6 +376,7 @@ fn main() {
     let mut line_empty = true;
 
     if std::env::args_os().len() == 1 {
+        let mut interp = Interpreter::new();
         let mut ed = rustyline::Editor::<completion::GramHelper, DefaultHistory>::new().unwrap();
 
 		let helper = completion::GramHelper {
@@ -398,26 +454,22 @@ fn main() {
             }
         }
     } else {
+        // Parse command-line arguments before initializing TDLib. Clap exits
+        // here after printing help, so no native client or worker threads need
+        // to be torn down for `gram --help` or `gram help`.
         let matches = Cli::command()
             .styles(styles)
-            .color(if interp.conf.lock().settings.color {
-                ColorChoice::Always
-            } else {
-                ColorChoice::Never
-            })
+            .color(ColorChoice::Auto)
             .get_matches();
 
         let cli = Cli::from_arg_matches(&matches).unwrap();
 
         if matches!(cli.subcommand, Command::Clear) {
-            error!(
-                interp.conf.lock().settings.color,
-                "clear only works in REPL"
-            );
+            eprintln!("clear only works in REPL");
             return;
         }
 
+        let mut interp = Interpreter::new();
         interp.run(cli.subcommand);
     }
 }
-

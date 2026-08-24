@@ -17,6 +17,7 @@ use td_api::*;
 use crate::{
     Cli, Command, GramChat, conf::GramConf, interp::commands::{AuthCommands as _, ChatCommands as _, LabelCommands as _, SettingCommands}, util
 };
+use crate::util::{log_err, tri};
 
 use std::path::Path;
 
@@ -85,8 +86,8 @@ impl Interpreter {
 				target_chat,
 				target_message,
 			} => {
-				let msg = msg(target_chat, target_message);
-				
+				let msg = tri!(self, msg(target_chat, target_message));
+
 				let toml = toml::to_string_pretty(&msg).unwrap();
 				let color = self.conf.lock().settings.color;
 
@@ -116,7 +117,7 @@ impl Interpreter {
 					}
 				}
 
-				let msg = msg(target_chat, target_message);
+				let msg = tri!(self, msg(target_chat, target_message));
 
 				let mut val = serde_json::to_value(&msg).unwrap();
 				rename_type(&mut val);
@@ -130,7 +131,7 @@ impl Interpreter {
 				target_chat,
 				target_message,
 			} => {
-				let msg = msg(target_chat, target_message);
+				let msg = tri!(self, msg(target_chat, target_message));
 
 				let json = serde_json::to_string_pretty(&msg).unwrap();
 				let color = self.conf.lock().settings.color;
@@ -164,20 +165,20 @@ impl Interpreter {
 
 				let chat_id = self.resolve_user(target_chat);
 
-				cli.messages().pin_chat_message(chat_id, target_message, true, false);
+				log_err!(self, cli.messages().pin_chat_message(chat_id, target_message, true, false));
 			},
 			Command::Unpin { target_chat, target_message } => {
 				let mut cli = self.client.lock();
 
 				let chat_id = self.resolve_user(target_chat);
 
-				cli.messages().unpin_chat_message(chat_id, target_message);
+				log_err!(self, cli.messages().unpin_chat_message(chat_id, target_message));
 			},
 			Command::Search { q } => {
 				let (target_chat, q) = if q.first().map(String::as_str) == Some("in") {
 					let chat = q.get(1).cloned().unwrap_or_default();
 					let target_chat = Some(match chat.parse::<i64>() {
-						Ok(id) => GramChat::ChatID(id),
+						Ok(id) => GramChat::ChatId(id),
 						Err(_) => GramChat::Label(chat),
 					});
 					let rest = q.get(2..).unwrap_or(&[]).join(" ");
@@ -212,98 +213,85 @@ impl Interpreter {
 			Command::Me => {
 				let mut cli = self.client.lock();
 
-				let me = cli
-					.general()
-					.get_me();
+				let me = tri!(self, cli.general().get_me());
 
-				let me_full = cli
-					.users()
-					.get_user_full_info(me.id);
+				let me_full = tri!(self, cli.users().get_user_full_info(me.id));
 
 				self.print_user_full(me, me_full);
 			}
-			Command::Chat { chat } => {
-				let mut cli = self.client.lock();
+            Command::Note { chat, note } => {
+                let mut cli = self.client.lock();
 
+                let chat_id = self.resolve_user(chat);
+
+                tri!(
+                    self,
+
+                    cli
+                        .users()
+                        .set_user_note(chat_id, FormattedText { text: note, entities: vec![] })
+                );
+            }
+			Command::Chat { chat } => {
+				if !self.ensure_chats_loaded() {
+					return;
+				}
+
+				let mut cli = self.client.lock();
 				let chat_id = self.resolve_user(chat);
 
-				let user = cli
-					.chats()
-					.get_chat(chat_id);
+				let user = tri!(self, cli.chats().get_chat(chat_id));
 
 				match user.r#type {
 					ChatType::Private { user_id } => {
-						let user = cli
-							.users()
-							.get_user(user_id);
+						let user = tri!(self, cli.users().get_user(user_id));
 
-						let user_full = cli
-							.users()
-							.get_user_full_info(user_id);
+						let user_full = tri!(self, cli.users().get_user_full_info(user_id));
 
 						self.print_user_full(user, user_full);
 					},
 					ChatType::BasicGroup { basic_group_id } => {
-						let basic_group = cli.groups()
-							.get_basic_group_full_info(basic_group_id);
+						let basic_group = tri!(self, cli.groups().get_basic_group_full_info(basic_group_id));
 
-						let basic_group_partial_info = cli.groups()
-							.get_basic_group(basic_group_id);
+						let basic_group_partial_info = tri!(self, cli.groups().get_basic_group(basic_group_id));
 
 						self.print_basic_group_meta(basic_group_partial_info, basic_group.clone());
 
 						for member in basic_group.members {
 							if let MessageSender::User { user_id } = member.member_id {
-								let user = cli
-									.users()
-									.get_user(user_id);
+								let user = tri!(self, cli.users().get_user(user_id));
 
-								let user_full = cli
-									.users()
-									.get_user_full_info(user_id);
+								let user_full = tri!(self, cli.users().get_user_full_info(user_id));
 
 								self.print_user_full(user, user_full);
 							}
 						}
 					},
 					ChatType::Supergroup { supergroup_id, .. } => {
-                        let super_group_full_info = cli.groups()
-                            .get_supergroup_full_info(supergroup_id);
+                        let super_group_full_info = tri!(self, cli.groups().get_supergroup_full_info(supergroup_id));
 
-                        let super_group = cli.groups()
-                            .get_supergroup(supergroup_id);
+                        let super_group = tri!(self, cli.groups().get_supergroup(supergroup_id));
 
-                        let members = cli.groups()
-                            .get_supergroup_members(supergroup_id, None, 0, 10000);
+                        let members = tri!(self, cli.groups().get_supergroup_members(supergroup_id, None, 0, 10000));
 
                         self.print_super_group_meta(super_group, super_group_full_info.clone());
 
 						for member in members.members {
 							if let MessageSender::User { user_id } = member.member_id {
-								let user = cli
-									.users()
-									.get_user(user_id);
+								let user = tri!(self, cli.users().get_user(user_id));
 
-								let user_full = cli
-									.users()
-									.get_user_full_info(user_id);
+								let user_full = tri!(self, cli.users().get_user_full_info(user_id));
 
 								self.print_user_full(user, user_full);
 							}
 						}
                     },
 					ChatType::Secret { secret_chat_id, user_id } => {
-                        let user = cli
-                            .users()
-                            .get_user(user_id);
+                        let user = tri!(self, cli.users().get_user(user_id));
 
-                        let user_full = cli
-                            .users()
-                            .get_user_full_info(user_id);
+                        let user_full = tri!(self, cli.users().get_user_full_info(user_id));
 
-                        let chat = cli
-                            .chats()
-                            .get_secret_chat(secret_chat_id);
+                        let chat = tri!(self, cli.chats().get_secret_chat(secret_chat_id));
 
                         util::info!(self.conf.lock().settings.color, "secret chat layer: {}", chat.layer);
 
@@ -317,7 +305,7 @@ impl Interpreter {
 			} => {
 				let chat = self.resolve_user(target_chat);
 
-				self.client.lock().messages().delete_messages(chat, vec![target_message], true);
+				log_err!(self, self.client.lock().messages().delete_messages(chat, vec![target_message], true));
 			}
 			Command::Edit { 
 				target_chat,
@@ -326,14 +314,14 @@ impl Interpreter {
 			} => {
 				let chat = self.resolve_user(target_chat);
 
-				self.client.lock().messages().edit_message_text(chat, target_message, None, InputMessageContent::InputMessageText {
+				log_err!(self, self.client.lock().messages().edit_message_text(chat, target_message, None, InputMessageContent::InputMessageText {
 					text: FormattedText {
 						text: message.join(" ").to_owned(),
 						entities: vec![],
 					},
 					link_preview_options: None,
 					clear_draft: false
-				});
+				}));
 			}
             Command::Reply {
                 target_chat,
@@ -364,6 +352,22 @@ impl Interpreter {
 						return;
 					}
 				}
+
+                util::info!(self.conf.lock().settings.color, "are you sure you wanna run the following scripts: \n\t{}? [Y/n]", files.join(","));
+
+                let mut buf = String::new();
+
+                if let Err(e) = std::io::stdin().read_line(&mut buf) {
+                    util::error!(self.conf.lock().settings.color, "failed to read from stdin: {}", e);
+                    return
+                }
+
+                let buf = buf.trim().to_lowercase();
+
+                if buf != "y" && buf != "yes" && buf != "yea" && buf != "" {
+                    util::info!(self.conf.lock().settings.color, "cancelling operation.");
+                    return
+                }
 
 				for file in files {
 					let contents = std::fs::read_to_string(&file).unwrap();
@@ -412,7 +416,9 @@ impl Interpreter {
         let mut client = self.client.lock();
 
         if matches!(client.state(), AuthorizationState::Ready) {
-            self.me = Some(client.general().get_me().id);
+            if let Ok(me) = client.general().get_me() {
+                self.me = Some(me.id);
+            }
         }
     }
 
